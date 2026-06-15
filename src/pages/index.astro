@@ -1,0 +1,238 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Loader from '../components/Loader.astro';
+import { loaders } from '../data/loaders';
+import { loaderCss, loaderMarkup } from '../utils/loaderCss';
+
+// Per-loader copyable snippet: required markup as a leading comment, then the CSS.
+const snippets: Record<string, string> = {};
+for (const loader of loaders) {
+  const css = loaderCss[loader.type];
+  if (!css) continue;
+  snippets[loader.type] = `/* Markup: ${loaderMarkup(loader.type)} */\n\n${css}`;
+}
+---
+
+<Layout>
+  <header class="site-header">
+    <div class="brand">
+      <div class="brand-mark">L</div>
+      <span class="mono">CSS Loader Library</span>
+    </div>
+    <div class="header-status mono">
+      <span class="pulse-dot"></span>
+      {loaders.length} loaders · MIT
+    </div>
+  </header>
+
+  <section class="hero">
+    <span class="hero-tag mono">Pure CSS · Copy &amp; paste</span>
+    <h1>{loaders.length} <em>CSS loaders</em>,<br />free to copy.</h1>
+    <p>
+      A library of {loaders.length} loading spinners built with pure CSS — no
+      JavaScript, no dependencies. Click any loader to view and copy its CSS.
+      Each snippet is self-contained, paints with a single <code>--ink</code>
+      colour token, and respects <code>prefers-reduced-motion</code>.
+    </p>
+  </section>
+
+  <main class="library">
+    <div class="panel">
+      <div class="library-head">
+        <span class="mono">Click a loader to copy its CSS</span>
+        <span class="mono">{loaders.length} loaders</span>
+      </div>
+
+      <div class="grid" id="loader-grid">
+        {
+          loaders.map((loader) => (
+            <article
+              class="cell"
+              role="button"
+              tabindex="0"
+              data-type={loader.type}
+              data-name={loader.name}
+              data-index={loader.index}
+              aria-label={`View CSS for ${loader.name} loader`}
+            >
+              <span class="cell-index mono">{loader.index}</span>
+              <span class="cell-action mono">⧉ CSS</span>
+              <div class="stage">
+                <Loader type={loader.type} />
+              </div>
+              <h3>{loader.name}</h3>
+            </article>
+          ))
+        }
+      </div>
+
+      <div class="sentinel" id="sentinel" hidden>
+        <span class="mono">Loading more loaders…</span>
+      </div>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <span class="mono">CSS Loader Library</span>
+    <span class="mono">Pure CSS · No dependencies · MIT licensed</span>
+  </footer>
+
+  <!-- Copy-to-clipboard modal -->
+  <div class="modal-overlay" id="css-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-head">
+        <div class="modal-title-group">
+          <span class="modal-index mono" id="modal-index"></span>
+          <h2 class="modal-title mono" id="modal-title"></h2>
+        </div>
+        <button class="modal-close mono" id="modal-close" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-preview">
+        <div class="stage" id="modal-preview"></div>
+      </div>
+      <div class="modal-code-wrap">
+        <pre class="modal-code"><code id="modal-code"></code></pre>
+      </div>
+      <div class="modal-foot">
+        <span class="mono modal-hint" id="modal-hint">Pure CSS · self-contained</span>
+        <button class="modal-copy mono" id="modal-copy">Copy CSS</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="application/json" id="loader-snippets" set:html={JSON.stringify(snippets)}></script>
+</Layout>
+
+<script>
+  const BATCH = 12;
+  const cells = Array.from(document.querySelectorAll<HTMLElement>('.cell'));
+  const sentinel = document.getElementById('sentinel')!;
+
+  // mark lazy mode active so CSS can pause off-screen animations;
+  // without JS everything stays visible and animated (progressive enhancement)
+  document.documentElement.classList.add('lazy-enabled');
+
+  // pause/resume animations as cells enter and leave the viewport
+  const visibility = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        entry.target.classList.toggle('in-view', entry.isIntersecting);
+      }
+    },
+    { rootMargin: '100px' }
+  );
+
+  // reveal cells in batches as the sentinel approaches the viewport
+  let shown = BATCH;
+  cells.slice(BATCH).forEach((cell) => cell.setAttribute('hidden', ''));
+  cells.slice(0, BATCH).forEach((cell) => visibility.observe(cell));
+
+  const loadMore = new IntersectionObserver(
+    (entries) => {
+      if (!entries[0].isIntersecting) return;
+      cells.slice(shown, shown + BATCH).forEach((cell) => {
+        cell.removeAttribute('hidden');
+        visibility.observe(cell);
+      });
+      shown += BATCH;
+      if (shown >= cells.length) {
+        loadMore.disconnect();
+        sentinel.remove();
+      }
+    },
+    { rootMargin: '300px' }
+  );
+
+  if (cells.length > BATCH) {
+    sentinel.removeAttribute('hidden');
+    loadMore.observe(sentinel);
+  }
+
+  // ---------- Copy-to-clipboard modal ----------
+  const snippets: Record<string, string> = JSON.parse(
+    document.getElementById('loader-snippets')!.textContent || '{}'
+  );
+
+  const overlay = document.getElementById('css-modal')!;
+  const modalIndex = document.getElementById('modal-index')!;
+  const modalTitle = document.getElementById('modal-title')!;
+  const modalPreview = document.getElementById('modal-preview')!;
+  const modalCode = document.getElementById('modal-code')!;
+  const copyBtn = document.getElementById('modal-copy') as HTMLButtonElement;
+  const closeBtn = document.getElementById('modal-close')!;
+
+  let lastFocused: HTMLElement | null = null;
+  let copyReset: number | undefined;
+
+  function openModal(cell: HTMLElement) {
+    const type = cell.dataset.type!;
+    const css = snippets[type];
+    if (!css) return;
+
+    modalIndex.textContent = cell.dataset.index || '';
+    modalTitle.textContent = cell.dataset.name || '';
+    modalCode.textContent = css;
+
+    // clone the live loader for the preview
+    const loaderEl = cell.querySelector('.stage > *');
+    modalPreview.replaceChildren(loaderEl ? loaderEl.cloneNode(true) : document.createTextNode(''));
+
+    copyBtn.textContent = 'Copy CSS';
+    copyBtn.classList.remove('copied');
+
+    lastFocused = cell;
+    overlay.removeAttribute('hidden');
+    document.body.style.overflow = 'hidden';
+    copyBtn.focus();
+  }
+
+  function closeModal() {
+    overlay.setAttribute('hidden', '');
+    document.body.style.overflow = '';
+    modalPreview.replaceChildren();
+    lastFocused?.focus();
+  }
+
+  async function copyCss() {
+    const text = modalCode.textContent || '';
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // fallback for non-secure contexts
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    }
+    copyBtn.textContent = 'Copied ✓';
+    copyBtn.classList.add('copied');
+    window.clearTimeout(copyReset);
+    copyReset = window.setTimeout(() => {
+      copyBtn.textContent = 'Copy CSS';
+      copyBtn.classList.remove('copied');
+    }, 1800);
+  }
+
+  cells.forEach((cell) => {
+    cell.addEventListener('click', () => openModal(cell));
+    cell.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        openModal(cell);
+      }
+    });
+  });
+
+  copyBtn.addEventListener('click', copyCss);
+  closeBtn.addEventListener('click', closeModal);
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) closeModal();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !overlay.hasAttribute('hidden')) closeModal();
+  });
+</script>
