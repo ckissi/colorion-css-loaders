@@ -96,3 +96,33 @@ export function loaderMarkup(type: LoaderType): string {
   if (!count) return `<div class="ld-${type}"></div>`;
   return `<div class="ld-${type}">${'<i></i>'.repeat(count)}</div>`;
 }
+
+// Per-loader copyable snippet: required markup as a leading comment, then the
+// self-contained CSS. Keyed by loader type (matches each cell's data-type).
+export const snippets: Record<string, string> = {};
+// Per-loader LLM prompt: a self-contained instruction a coding agent can paste
+// to recreate the exact same loader (markup + CSS).
+export const prompts: Record<string, string> = {};
+for (const loader of loaders) {
+  const css = loaderCss[loader.type];
+  if (!css) continue;
+  const markup = loaderMarkup(loader.type);
+  snippets[loader.type] = `/* Markup: ${markup} */\n\n${css}`;
+  prompts[loader.type] = `Recreate this loading spinner exactly, using pure CSS only — no JavaScript, no external libraries, no dependencies.
+
+It is a "${loader.name}" loader: an animated loading indicator whose animation must match the CSS below precisely (same shape, motion, timing curve, and colours).
+
+Use this exact HTML markup:
+
+${markup}
+
+Apply this CSS:
+
+${css}
+
+Requirements:
+- Keep the markup and class names exactly as shown.
+- The loader paints with a single \`--ink\` colour token — preserve it so the colour can be overridden (it defaults to \`currentColor\`).
+- Respect \`prefers-reduced-motion: reduce\` by disabling the animation.
+- Do not add any JavaScript; the effect must be achieved with CSS alone.`;
+}

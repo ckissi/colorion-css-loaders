@@ -2,15 +2,10 @@
 import Layout from '../layouts/Layout.astro';
 import Loader from '../components/Loader.astro';
 import { loaders } from '../data/loaders';
-import { loaderCss, loaderMarkup } from '../utils/loaderCss';
 
-// Per-loader copyable snippet: required markup as a leading comment, then the CSS.
-const snippets: Record<string, string> = {};
-for (const loader of loaders) {
-  const css = loaderCss[loader.type];
-  if (!css) continue;
-  snippets[loader.type] = `/* Markup: ${loaderMarkup(loader.type)} */\n\n${css}`;
-}
+// The CSS snippets + LLM prompts are emitted as a static /loader-data.json file
+// (see loader-data.json.ts) and fetched on demand when the modal first opens,
+// so that text stays out of the initial HTML document.
 ---
 
 <Layout>
@@ -30,16 +25,17 @@ for (const loader of loaders) {
     <h1>{loaders.length} <em>CSS loaders</em>,<br />free to copy.</h1>
     <p>
       A library of {loaders.length} loading spinners built with pure CSS — no
-      JavaScript, no dependencies. Click any loader to view and copy its CSS.
-      Each snippet is self-contained, paints with a single <code>--ink</code>
-      colour token, and respects <code>prefers-reduced-motion</code>.
+      JavaScript, no dependencies. Copy the self-contained <code>CSS</code> for
+      any loader, or grab a ready-made <code>Prompt</code> to have your coding
+      agent recreate it. Every snippet paints with a single <code>--ink</code>
+      colour token and respects <code>prefers-reduced-motion</code>.
     </p>
   </section>
 
   <main class="library">
     <div class="panel">
       <div class="library-head">
-        <span class="mono">Click a loader to copy its CSS</span>
+        <span class="mono">Click a loader to copy its CSS or prompt</span>
         <span class="mono">{loaders.length} loaders</span>
       </div>
 
@@ -56,7 +52,10 @@ for (const loader of loaders) {
               aria-label={`View CSS for ${loader.name} loader`}
             >
               <span class="cell-index mono">{loader.index}</span>
-              <span class="cell-action mono">⧉ CSS</span>
+              <div class="cell-actions">
+                <button class="cell-action mono" type="button" data-action="prompt" tabindex="-1" aria-label={`Copy LLM prompt for ${loader.name} loader`}>◳ Prompt</button>
+                <button class="cell-action mono" type="button" data-action="css" tabindex="-1" aria-label={`View CSS for ${loader.name} loader`}>⧉ CSS</button>
+              </div>
               <div class="stage">
                 <Loader type={loader.type} />
               </div>
@@ -74,6 +73,12 @@ for (const loader of loaders) {
 
   <footer class="site-footer">
     <span class="mono">CSS Loader Library</span>
+    <nav class="footer-links mono">
+      <a href="https://colorion.co?ref=cssloaders.colorion.co" target="_blank" rel="noopener" referrerpolicy="no-referrer-when-downgrade">Colorion</a>
+      <a href="https://2colors.colorion.co?ref=cssloaders.colorion.co" target="_blank" rel="noopener" referrerpolicy="no-referrer-when-downgrade">2 Colors</a>
+      <a href="https://gradientbuttons.colorion.co?ref=cssloaders.colorion.co" target="_blank" rel="noopener" referrerpolicy="no-referrer-when-downgrade">Gradient Buttons</a>
+      <a href="https://animatedbuttons.colorion.co?ref=cssloaders.colorion.co" target="_blank" rel="noopener" referrerpolicy="no-referrer-when-downgrade">Animated Buttons</a>
+    </nav>
     <span class="mono">Pure CSS · No dependencies · MIT licensed</span>
   </footer>
 
@@ -100,7 +105,6 @@ for (const loader of loaders) {
     </div>
   </div>
 
-  <script type="application/json" id="loader-snippets" set:html={JSON.stringify(snippets)}></script>
 </Layout>
 
 <script>
@@ -149,13 +153,28 @@ for (const loader of loaders) {
   }
 
   // ---------- Copy-to-clipboard modal ----------
-  const snippets: Record<string, string> = JSON.parse(
-    document.getElementById('loader-snippets')!.textContent || '{}'
-  );
+  type Mode = 'css' | 'prompt';
+  type LoaderData = { snippets: Record<string, string>; prompts: Record<string, string> };
+
+  // The CSS snippets + LLM prompts live in a static JSON file rather than inline,
+  // so they don't bloat the document. Fetched once, on first use.
+  let dataPromise: Promise<LoaderData> | undefined;
+  const loadData = () =>
+    (dataPromise ??= fetch('/loader-data.json').then((r) => r.json() as Promise<LoaderData>));
+
+  const MODE_CONFIG: Record<Mode, { key: keyof LoaderData; copyLabel: string; hint: string }> = {
+    css: { key: 'snippets', copyLabel: 'Copy CSS', hint: 'Pure CSS · self-contained' },
+    prompt: { key: 'prompts', copyLabel: 'Copy prompt', hint: 'LLM prompt · paste into your coding agent' },
+  };
+
+  // Warm the cache as soon as the user signals intent (pointer over the grid).
+  const grid = document.getElementById('loader-grid');
+  grid?.addEventListener('pointerenter', loadData, { once: true });
 
   const overlay = document.getElementById('css-modal')!;
   const modalIndex = document.getElementById('modal-index')!;
   const modalTitle = document.getElementById('modal-title')!;
+  const modalHint = document.getElementById('modal-hint')!;
   const modalPreview = document.getElementById('modal-preview')!;
   const modalCode = document.getElementById('modal-code')!;
   const copyBtn = document.getElementById('modal-copy') as HTMLButtonElement;
@@ -163,27 +182,44 @@ for (const loader of loaders) {
 
   let lastFocused: HTMLElement | null = null;
   let copyReset: number | undefined;
+  let currentMode: Mode = 'css';
+  let currentText = ''; // the copyable text for the open modal ('' while loading)
+  let openToken = 0; // guards against races when switching loaders mid-fetch
 
-  function openModal(cell: HTMLElement) {
+  async function openModal(cell: HTMLElement, mode: Mode = 'css') {
     const type = cell.dataset.type!;
-    const css = snippets[type];
-    if (!css) return;
+    const config = MODE_CONFIG[mode];
+    const token = ++openToken;
 
+    // Show the modal shell immediately; the code text fills in once data loads.
+    currentMode = mode;
+    currentText = '';
     modalIndex.textContent = cell.dataset.index || '';
     modalTitle.textContent = cell.dataset.name || '';
-    modalCode.textContent = css;
+    modalHint.textContent = config.hint;
+    modalCode.textContent = 'Loading…';
 
     // clone the live loader for the preview
     const loaderEl = cell.querySelector('.stage > *');
     modalPreview.replaceChildren(loaderEl ? loaderEl.cloneNode(true) : document.createTextNode(''));
 
-    copyBtn.textContent = 'Copy CSS';
+    copyBtn.textContent = config.copyLabel;
     copyBtn.classList.remove('copied');
 
     lastFocused = cell;
     overlay.removeAttribute('hidden');
     document.body.style.overflow = 'hidden';
     copyBtn.focus();
+
+    let text = '';
+    try {
+      text = (await loadData())[config.key][type] || '';
+    } catch {
+      text = '';
+    }
+    if (token !== openToken) return; // a newer open superseded this one
+    currentText = text;
+    modalCode.textContent = text || 'Failed to load — please try again.';
   }
 
   function closeModal() {
@@ -194,7 +230,8 @@ for (const loader of loaders) {
   }
 
   async function copyCss() {
-    const text = modalCode.textContent || '';
+    const text = currentText;
+    if (!text) return; // data not loaded yet (or failed) — nothing to copy
     try {
       await navigator.clipboard.writeText(text);
     } catch {
@@ -212,13 +249,16 @@ for (const loader of loaders) {
     copyBtn.classList.add('copied');
     window.clearTimeout(copyReset);
     copyReset = window.setTimeout(() => {
-      copyBtn.textContent = 'Copy CSS';
+      copyBtn.textContent = MODE_CONFIG[currentMode].copyLabel;
       copyBtn.classList.remove('copied');
     }, 1800);
   }
 
   cells.forEach((cell) => {
-    cell.addEventListener('click', () => openModal(cell));
+    cell.addEventListener('click', (e) => {
+      const action = (e.target as HTMLElement).closest<HTMLElement>('[data-action]');
+      openModal(cell, action?.dataset.action === 'prompt' ? 'prompt' : 'css');
+    });
     cell.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
