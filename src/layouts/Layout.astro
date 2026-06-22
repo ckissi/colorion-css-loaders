@@ -10,6 +10,20 @@ const {
   title = 'CSS Loader Library — 99 pure-CSS loaders, free to copy',
   description = 'A library of 99 loading spinners built with pure CSS. Click any loader to copy its CSS — no JavaScript, no dependencies, MIT licensed.',
 } = Astro.props;
+
+// Absolute URLs for canonical + social tags. Astro.site is configured in
+// astro.config.mjs; fall back to the production origin during dev.
+const SITE = Astro.site ?? new URL('https://css-loaders.colorion.co');
+const canonical = new URL(Astro.url.pathname, SITE).href;
+const ogImage = new URL('/og-image.png', SITE).href;
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'WebSite',
+  name: 'CSS Loader Library',
+  url: SITE.href,
+  description,
+};
 ---
 
 <!DOCTYPE html>
@@ -18,7 +32,35 @@ const {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content={description} />
+    <meta name="robots" content="index,follow" />
+    <meta name="theme-color" content="#0F191E" />
     <title>{title}</title>
+    <link rel="canonical" href={canonical} />
+
+    <!-- Favicons, PWA manifest, Apple touch icon -->
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="CSS Loader Library" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+
+    <!-- Twitter / X -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage} />
+
+    <!-- Structured data -->
+    <script type="application/ld+json" is:inline set:html={JSON.stringify(jsonLd)} />
 
     <!-- Self-hosted fonts. Preload the above-the-fold weights (Inter 500 powers
          the hero h1 / LCP element; Inter 400 the body copy) so they arrive

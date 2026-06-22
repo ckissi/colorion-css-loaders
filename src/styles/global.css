@@ -57,6 +57,20 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+/* Visually hidden, but available to assistive tech and the accessibility tree.
+   Used for structural headings that the visual design doesn't surface. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 body {
   background: var(--surface);
   color: var(--secondary);
@@ -183,7 +197,9 @@ body {
 }
 
 .menu-list a {
-  display: block;
+  display: flex;
+  align-items: center;
+  min-height: 48px;
   padding: var(--base) calc(var(--base) * 1.5);
   font-size: 12px;
   letter-spacing: 0.04em;
